@@ -41,10 +41,11 @@ backbone_cfg = dict(
 
 head_cfg = dict(
     type='RGBPoseHead',
-    num_classes=60,  # ← NTU-60的60类
+    num_classes=60,
+    num_coarse_classes=8,  # ← 添加：NTU-60使用8个粗类
     in_channels=[2048, 512],
-    loss_components=['rgb', 'pose'],  # ← 只用rgb和pose，去掉coarse
-    loss_weights=[1., 1.],
+    loss_components=['rgb', 'pose', 'rgb_coarse', 'pose_coarse'],  # ← 改回来
+    loss_weights=[1., 1., 0.5, 0.5],  # ← 添加粗分类权重
     average_clips='prob')
 
 data_preprocessor = dict(
@@ -68,9 +69,11 @@ model = dict(
 # ==========================================
 dataset_type = 'PoseDataset'
 data_root = '/home/zh/ChCode/codes01/mmaction2/data/nturgbd_videos/'
-ann_file = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub_train.pkl'  # 或 ntu60_2d.pkl
-ann_file_val = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub_val.pkl'
-ann_file_test = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub_val.pkl'
+
+# ← 改：使用合并后的pkl文件
+ann_file = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub.pkl'
+ann_file_val = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub.pkl'
+ann_file_test = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub.pkl'
 
 # NTU-60的左右关键点（17点-2D骨架）
 left_kp = [1, 3, 5, 7, 9, 11, 13, 15]
@@ -205,6 +208,32 @@ param_scheduler = [
         gamma=0.1)
 ]
 
-load_from = None  # 初始设置为None，稍后指定预训练权重
+load_from = '/home/zh/ChCode/codes01/mmaction2/pretrained/ntu60/rgbpose_ntu60_init.pth'  # 初始设置为None，稍后指定预训练权重
 
 auto_scale_lr = dict(enable=False, base_batch_size=40)
+
+
+# python << 'EOF'
+# import pickle
+# import os
+
+# # 检查骨架
+# with open('/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_2d.pkl', 'rb') as f:
+#     data = pickle.load(f)
+#     skeleton_names = [ann['frame_dir'] for ann in data['annotations']]
+#     print(f"骨架样本数: {len(skeleton_names)}")
+#     print(f"示例: {skeleton_names[0]}")  # 例如: S001C001P001R001A001
+
+# # 检查视频
+# videos = os.listdir('/home/zh/ChCode/codes01/mmaction2/data/nturgbd_videos/')
+# print(f"视频数量: {len([v for v in videos if v.endswith('.mp4')])}")
+# print(f"示例: {videos[0]}")
+
+# # 检查是否匹配
+# sample_name = skeleton_names[0]
+# video_name = sample_name + '.mp4'
+# if video_name in videos:
+#     print(f"✓ 视频和骨架匹配！")
+# else:
+#     print(f"✗ 警告：{video_name} 不存在")
+# EOF

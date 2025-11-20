@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import Dict, List, Tuple, Union
 
+from mmaction.models.recognizers.recognizer3d_mm import fine2coarse_ntu60_semantic
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,11 +31,23 @@ def action2body(x):
     else:
         return 6
 
+def action2body_ntu60(x):
+    """
+    NTU-60的action到body映射（0-59 → 0-7）
+    按每8个动作一组
+    """
+    if x < 0 or x > 59:
+        print(f"警告：标签{x}越界！")
+        return 0
+    return min(x // 8, 7)  # 0-7, 8-15, ..., 56-59 → 0-7
+
 # borrowed from https://github.com/MonsterZhZh/HRN/blob/59944e48fcbf41cc475402c8b9cb6af301006399/CUB_Aircraft/tree_loss.py#L5
 
 class TreeLoss(nn.Module):
-    def __init__(self):
+    def __init__(self,num_actions=52, num_bodies=7):
         super(TreeLoss, self).__init__()
+        self.num_actions = num_actions
+        self.num_bodies = num_bodies
         self.stateSpace = self.generateStateSpace().cuda()
         self.sig = nn.Sigmoid()
 
@@ -53,12 +66,30 @@ class TreeLoss(nn.Module):
             loss[i] = -torch.log(marginal / z[i])
         return torch.mean(loss)
 
+    # def generateStateSpace(self):
+    #     stat_list = np.eye(59)
+    #     for i in range(7, 59):
+    #         temp = stat_list[i]
+    #         index = np.where(temp > 0)[0]
+    #         coarse = action2body(int(index) - 7)
+    #         stat_list[i][coarse] = 1
+    #     stateSpace = torch.tensor(stat_list)
+    #     return stateSpace
     def generateStateSpace(self):
-        stat_list = np.eye(59)
-        for i in range(7, 59):
+        total_size = self.num_bodies + self.num_actions
+        stat_list = np.eye(total_size)
+        
+        for i in range(self.num_bodies, total_size):
             temp = stat_list[i]
             index = np.where(temp > 0)[0]
-            coarse = action2body(int(index) - 7)
+            action_id = int(index) - self.num_bodies
+            
+            # 根据动作数判断使用哪个映射
+            if self.num_actions == 60:
+                coarse = fine2coarse_ntu60_semantic(action_id)
+            else:
+                coarse = action2body(action_id)
+            
             stat_list[i][coarse] = 1
         stateSpace = torch.tensor(stat_list)
         return stateSpace
@@ -67,12 +98,13 @@ class TreeLoss(nn.Module):
 
 class RenovateNet_Fine(nn.Module):
     def __init__(self, n_channel, n_class, alp=0.125, tmp=0.125, mom=0.9, h_channel=None, version='V0',
-                 pred_threshold=0.0, use_p_map=True):
+                 pred_threshold=0.0, use_p_map=True, n_class_coarse=7):
         super(RenovateNet_Fine, self).__init__()
         self.n_channel = n_channel
         self.h_channel = n_channel if h_channel is None else h_channel
         self.n_class = n_class
-        self.n_class_coarse = 7
+        # self.n_class_coarse = 7
+        self.n_class_coarse = n_class_coarse  # ← 改：使用传入的值
 
         self.alp = alp
         self.tmp = tmp
@@ -526,6 +558,7 @@ class RGBPoseHead(BaseHead):
                  loss_weights: Union[float, Tuple[float]] = 1.,
                  dropout: float = 0.5,
                  init_std: float = 0.01,
+                 num_coarse_classes: int = 7,  # ← 添加这个参数
                  **kwargs) -> None:
         super().__init__(num_classes, in_channels, loss_cls, **kwargs)
         if isinstance(dropout, float):
@@ -547,24 +580,30 @@ class RGBPoseHead(BaseHead):
 
         self.fc_rgb = nn.Linear(self.in_channels[0], num_classes)
         self.fc_pose = nn.Linear(self.in_channels[1], num_classes)
-        self.fc_rgb_coarse = nn.Linear(self.in_channels[0], 7)
-        self.fc_pose_coarse = nn.Linear(self.in_channels[1], 7)
+        self.fc_rgb_coarse = nn.Linear(self.in_channels[0], num_coarse_classes)
+        self.fc_pose_coarse = nn.Linear(self.in_channels[1], num_coarse_classes)
         self.avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
         self.avg_pool2d = nn.AdaptiveAvgPool2d((1, 1))
 
         self.fr_coarse_rgb = ST_RenovateNet(
-            2048, 8,  n_class=7, h_channel=128, version='V0', use_p_map=True)
+            2048, 8,  n_class=num_coarse_classes, h_channel=128, version='V0', use_p_map=True)
 
         self.fr_coarse_pose = ST_RenovateNet(
-            512, 32,  n_class=7, h_channel=128, version='V0',  use_p_map=True)
+            512, 32,  n_class=num_coarse_classes, h_channel=128, version='V0',  use_p_map=True)
 
         self.fr_rgb = ST_RenovateNet_Fine(
-            2048, n_class=52, version='V0', use_p_map=True)
+            2048, n_class=num_classes, version='V0', use_p_map=True,
+            n_class_coarse=num_coarse_classes)  # ← 传递粗分类数
         self.fr_pose = ST_RenovateNet_Fine(
-            512, n_class=52, version='V0',  use_p_map=True)
+            512, n_class=num_classes, version='V0', use_p_map=True,
+            n_class_coarse=num_coarse_classes)  # ← 传递粗分类数
 
-        self.tree_loss_rgb = TreeLoss()
-        self.tree_loss_pose = TreeLoss()
+        self.tree_loss_rgb = TreeLoss(
+            num_actions=num_classes, 
+            num_bodies=num_coarse_classes)
+        self.tree_loss_pose = TreeLoss(
+            num_actions=num_classes, 
+            num_bodies=num_coarse_classes)
 
     def init_weights(self) -> None:
         """Initiate the parameters from scratch."""
@@ -686,6 +725,11 @@ class RGBPoseHead(BaseHead):
             labels = labels.unsqueeze(0)
 
         losses = dict()
+
+        # ========== 在循环前判断数据集类型 ==========
+        max_label = int(labels.max().item())
+        is_ntu60 = (max_label >= 52)  # 标签范围判断
+
         for loss_name, weight in zip(self.loss_components, self.loss_weights):
             cls_score1 = cls_scores[loss_name]
             loss_cls = self.loss_by_scores(cls_score1, labels)
@@ -693,9 +737,13 @@ class RGBPoseHead(BaseHead):
             loss_cls[f'{loss_name}_loss_cls'] *= weight
             losses.update(loss_cls)
 
+            # ========== 修改：使用正确的映射函数 ==========
             labels_body = labels.cpu().numpy()
-            labels_body = np.array([action2body(i) for i in labels_body])
-            labels_body = torch.tensor(labels_body).cuda()
+            if is_ntu60:  # NTU-60
+                labels_body = np.array([action2body_ntu60(int(i)) for i in labels_body])
+            else:  # MA-52
+                labels_body = np.array([action2body(int(i)) for i in labels_body])
+            labels_body = torch.tensor(labels_body, dtype=torch.long).cuda()
 
             cls_score2 = cls_scores[loss_name+'_coarse']
             loss_name = loss_name+'_coarse'
