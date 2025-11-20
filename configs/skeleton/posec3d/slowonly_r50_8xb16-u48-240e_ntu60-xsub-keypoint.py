@@ -136,3 +136,43 @@ param_scheduler = [
 optim_wrapper = dict(
     optimizer=dict(type='SGD', lr=0.2, momentum=0.9, weight_decay=0.0003),
     clip_grad=dict(max_norm=40, norm_type=2))
+
+
+
+# python << 'EOF'
+# import pickle
+# with open('/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_2d.pkl', 'rb') as f:
+#     data = pickle.load(f)
+#     print(f"Keys: {data.keys()}")
+#     print(f"Splits: {data['split'].keys()}")
+#     print(f"Samples: {len(data['annotations'])}")
+#     sample = data['annotations'][0]
+#     print(f"Keypoint shape: {sample['keypoint'].shape}")  # 应该是[M, T, V, C]
+#     # M: 人数, T: 帧数, V: 关键点数(17或25), C: 坐标维度(2或3)
+# EOF
+
+
+python << 'EOF'
+import pickle
+import os
+
+# 检查骨架
+with open('data/skeleton/ntu60_xsub_train.pkl', 'rb') as f:
+    data = pickle.load(f)
+    skeleton_names = [ann['frame_dir'] for ann in data['annotations']]
+    print(f"骨架样本数: {len(skeleton_names)}")
+    print(f"示例: {skeleton_names[0]}")  # 例如: S001C001P001R001A001
+
+# 检查视频
+videos = os.listdir('data/nturgbd_videos/')
+print(f"视频数量: {len([v for v in videos if v.endswith('.mp4')])}")
+print(f"示例: {videos[0]}")
+
+# 检查是否匹配
+sample_name = skeleton_names[0]
+video_name = sample_name + '.mp4'
+if video_name in videos:
+    print(f"✓ 视频和骨架匹配！")
+else:
+    print(f"✗ 警告：{video_name} 不存在")
+EOF

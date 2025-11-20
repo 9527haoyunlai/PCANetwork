@@ -1,6 +1,8 @@
 _base_ = '../../../_base_/default_runtime.py'
 
-# model_cfg
+# ==========================================
+# 模型配置
+# ==========================================
 backbone_cfg = dict(
     type='RGBPoseConv3D',
     speed_ratio=4,
@@ -23,7 +25,7 @@ backbone_cfg = dict(
         lateral_infl=16,
         lateral_activate=(0, 1, 1),
         fusion_kernel=7,
-        in_channels=28,
+        in_channels=17,  # ← 如果是2D骨架用17，3D骨架用25
         base_channels=32,
         out_indices=(2, ),
         conv1_kernel=(1, 7, 7),
@@ -36,13 +38,15 @@ backbone_cfg = dict(
         temporal_strides=(1, 1, 1),
         dilations=(1, 1, 1),
         with_pool2=False))
+
 head_cfg = dict(
     type='RGBPoseHead',
-    num_classes=52,
+    num_classes=60,  # ← NTU-60的60类
     in_channels=[2048, 512],
-    loss_components=['rgb', 'pose'],
+    loss_components=['rgb', 'pose'],  # ← 只用rgb和pose，去掉coarse
     loss_weights=[1., 1.],
     average_clips='prob')
+
 data_preprocessor = dict(
     type='MultiModalDataPreprocessor',
     preprocessors=dict(
@@ -52,30 +56,29 @@ data_preprocessor = dict(
             std=[58.395, 57.12, 57.375],
             format_shape='NCTHW'),
         heatmap_imgs=dict(type='ActionDataPreprocessor')))
+
 model = dict(
     type='MMRecognizer3D',
     backbone=backbone_cfg,
     cls_head=head_cfg,
     data_preprocessor=data_preprocessor)
 
+# ==========================================
+# 数据配置
+# ==========================================
 dataset_type = 'PoseDataset'
-data_root = './data/ma52/raw_videos/'
-ann_file = './data/ma52/MA-52_openpose_28kp/MA52_train.pkl'
-ann_file_val = './data/ma52/MA-52_openpose_28kp/MA52_val.pkl'
-ann_file_test = './data/ma52/MA-52_openpose_28kp/MA52_test.pkl'
+data_root = '/home/zh/ChCode/codes01/mmaction2/data/nturgbd_videos/'
+ann_file = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub_train.pkl'  # 或 ntu60_2d.pkl
+ann_file_val = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub_val.pkl'
+ann_file_test = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub_val.pkl'
 
+# NTU-60的左右关键点（17点-2D骨架）
+left_kp = [1, 3, 5, 7, 9, 11, 13, 15]
+right_kp = [2, 4, 6, 8, 10, 12, 14, 16]
 
-left_kp = [2, 3, 4, 8, 9, 10, 14, 16]
-right_kp = [5, 6, 7, 11, 12, 13, 15, 17]
-
-
-skeletons = ((4, 3), (3, 2), (7, 6), (6, 5), (13, 12), (12, 11), (10, 9),
-             (9, 8), (11, 5), (8, 2), (5, 1), (2, 1), (0, 1), (15, 0),
-             (14, 0), (17, 15), (16, 14),
-             (23, 4), (24, 4), (25, 4), (26, 4), (27, 4),
-             (18, 7), (19, 7), (20, 7), (21, 7), (22, 7))
-left_limb = (0, 1, 6, 7, 9, 11, 14, 16, 17, 18, 19, 20, 21)
-right_limb = (2, 3, 4, 5, 8, 10, 13, 15, 22, 23, 24, 25, 26)
+# 如果是25点-3D骨架，使用：
+# left_kp = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
+# right_kp = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24]
 
 train_pipeline = [
     dict(
@@ -98,6 +101,7 @@ train_pipeline = [
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='PackActionInputs', collect_keys=('imgs', 'heatmap_imgs'))
 ]
+
 val_pipeline = [
     dict(
         type='MMUniformSampleFrames',
@@ -117,11 +121,12 @@ val_pipeline = [
     dict(type='FormatShape', input_format='NCTHW'),
     dict(type='PackActionInputs', collect_keys=('imgs', 'heatmap_imgs'))
 ]
+
 test_pipeline = [
     dict(
         type='MMUniformSampleFrames',
         clip_len=dict(RGB=8, Pose=32),
-        num_clips=10,
+        num_clips=10,  # 多clip测试
         test_mode=True),
     dict(type='MMDecode'),
     dict(type='MMCompact', hw_ratio=1., allow_imgpad=True),
@@ -146,7 +151,9 @@ train_dataloader = dict(
         type=dataset_type,
         ann_file=ann_file,
         data_prefix=dict(video=data_root),
+        split='xsub_train',  # ← NTU-60的split
         pipeline=train_pipeline))
+
 val_dataloader = dict(
     batch_size=1,
     num_workers=8,
@@ -156,24 +163,29 @@ val_dataloader = dict(
         type=dataset_type,
         ann_file=ann_file_val,
         data_prefix=dict(video=data_root),
+        split='xsub_val',
         pipeline=val_pipeline,
         test_mode=True))
+
 test_dataloader = dict(
-    batch_size=8,
-    num_workers=16,
+    batch_size=1,
+    num_workers=8,
     persistent_workers=True,
-    pin_memory=True,  # 添加这行，加速数据传输
     sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
         type=dataset_type,
         ann_file=ann_file_test,
         data_prefix=dict(video=data_root),
+        split='xsub_val',
         pipeline=test_pipeline,
         test_mode=True))
 
 val_evaluator = [dict(type='AccMetric')]
 test_evaluator = val_evaluator
 
+# ==========================================
+# 训练配置
+# ==========================================
 train_cfg = dict(
     type='EpochBasedTrainLoop', max_epochs=30, val_begin=3, val_interval=1)
 val_cfg = dict(type='ValLoop')
@@ -189,16 +201,10 @@ param_scheduler = [
         begin=0,
         end=30,
         by_epoch=True,
-        milestones=[10,20],
+        milestones=[10, 20],
         gamma=0.1)
 ]
 
-# load_from = './pretrained/rgbpose_conv3d_init.pth'  # noqa: E501
-# 改为
-load_from = None  # 使用命令行指定的checkpoint
+load_from = None  # 初始设置为None，稍后指定预训练权重
 
-# Default setting for scaling LR automatically
-#   - `enable` means enable scaling LR automatically
-#       or not by default.
-#   - `base_batch_size` = (8 GPUs) x (6 samples per GPU).
-auto_scale_lr = dict(enable=False, base_batch_size=10)
+auto_scale_lr = dict(enable=False, base_batch_size=40)
