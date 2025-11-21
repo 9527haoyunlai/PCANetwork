@@ -44,7 +44,7 @@ head_cfg = dict(
     num_classes=60,
     num_coarse_classes=8,  # ← 添加：NTU-60使用8个粗类
     in_channels=[2048, 512],
-    loss_components=['rgb', 'pose', 'rgb_coarse', 'pose_coarse'],  # ← 改回来
+    loss_components=['rgb', 'pose'],  # ← 只保留基础名称，不要加 _coarse
     loss_weights=[1., 1., 0.5, 0.5],  # ← 添加粗分类权重
     average_clips='prob')
 
@@ -146,8 +146,8 @@ test_pipeline = [
 ]
 
 train_dataloader = dict(
-    batch_size=10,
-    num_workers=8,
+    batch_size=20,
+    num_workers=16,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
     dataset=dict(
@@ -194,8 +194,18 @@ train_cfg = dict(
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
+# optim_wrapper = dict(
+#     optimizer=dict(type='SGD', lr=0.0075, momentum=0.9, weight_decay=0.0001),
+#     clip_grad=dict(max_norm=40, norm_type=2))
+
+# 学习率配置（双卡）
 optim_wrapper = dict(
-    optimizer=dict(type='SGD', lr=0.0075, momentum=0.9, weight_decay=0.0001),
+    optimizer=dict(
+        type='SGD', 
+        lr=0.015,           # 0.0075 × 2（双卡）
+        momentum=0.9, 
+        weight_decay=0.0001
+    ),
     clip_grad=dict(max_norm=40, norm_type=2))
 
 param_scheduler = [
@@ -213,27 +223,3 @@ load_from = '/home/zh/ChCode/codes01/mmaction2/pretrained/ntu60/rgbpose_ntu60_in
 auto_scale_lr = dict(enable=False, base_batch_size=40)
 
 
-# python << 'EOF'
-# import pickle
-# import os
-
-# # 检查骨架
-# with open('/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_2d.pkl', 'rb') as f:
-#     data = pickle.load(f)
-#     skeleton_names = [ann['frame_dir'] for ann in data['annotations']]
-#     print(f"骨架样本数: {len(skeleton_names)}")
-#     print(f"示例: {skeleton_names[0]}")  # 例如: S001C001P001R001A001
-
-# # 检查视频
-# videos = os.listdir('/home/zh/ChCode/codes01/mmaction2/data/nturgbd_videos/')
-# print(f"视频数量: {len([v for v in videos if v.endswith('.mp4')])}")
-# print(f"示例: {videos[0]}")
-
-# # 检查是否匹配
-# sample_name = skeleton_names[0]
-# video_name = sample_name + '.mp4'
-# if video_name in videos:
-#     print(f"✓ 视频和骨架匹配！")
-# else:
-#     print(f"✗ 警告：{video_name} 不存在")
-# EOF

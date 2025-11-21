@@ -568,8 +568,9 @@ class RGBPoseHead(BaseHead):
         if loss_components is not None:
             self.loss_components = loss_components
             if isinstance(loss_weights, float):
-                loss_weights = [loss_weights] * len(loss_components)
-            assert len(loss_weights) == len(loss_components)
+                loss_weights = [loss_weights] * 4  # 固定4个权重: rgb, pose, rgb_coarse, pose_coarse
+            # 注释掉断言，因为 loss_components 只包含基础名称，但 loss_weights 包含所有4个权重
+            # assert len(loss_weights) == len(loss_components)
             self.loss_weights = loss_weights
 
         self.dropout = dropout
@@ -700,18 +701,8 @@ class RGBPoseHead(BaseHead):
         return self.loss_by_feat(cls_scores, data_samples)
 
     def loss_by_feat(self, cls_scores: Dict[str, torch.Tensor],
-                     data_samples: SampleList) -> Dict:
-        """Calculate the loss based on the features extracted by the head.
-
-        Args:
-            cls_scores (dict[str, torch.Tensor]): The dict of
-                classification scores,
-            data_samples (list[:obj:`ActionDataSample`]): The batch
-                data samples.
-
-        Returns:
-            dict: A dictionary of loss components.
-        """
+                    data_samples: SampleList) -> Dict:
+        """Calculate the loss based on the features extracted by the head."""
         labels = torch.stack([x.gt_labels.item for x in data_samples])
         labels = labels.squeeze()
 
@@ -719,34 +710,47 @@ class RGBPoseHead(BaseHead):
             labels = labels.unsqueeze(0)
         elif labels.dim() == 1 and labels.size()[0] == self.num_classes \
                 and cls_scores.size()[0] == 1:
-            # Fix a bug when training with soft labels and batch size is 1.
-            # When using soft labels, `labels` and `cls_score` share the same
-            # shape.
             labels = labels.unsqueeze(0)
+
+        # ========== 将NTU-60标签从1-60转换为0-59 ==========
+        if labels.min().item() >= 1:
+            labels = labels - 1
+        # ========== 结束 ==========
 
         losses = dict()
 
         # ========== 在循环前判断数据集类型 ==========
         max_label = int(labels.max().item())
         is_ntu60 = (max_label >= 52)  # 标签范围判断
-
-        for loss_name, weight in zip(self.loss_components, self.loss_weights):
+        
+        # ========== 计算粗分类标签 ==========
+        labels_body = labels.cpu().numpy()
+        if is_ntu60:  # NTU-60
+            labels_body = np.array([action2body_ntu60(int(i)) for i in labels_body])
+        else:  # MA-52
+            labels_body = np.array([action2body(int(i)) for i in labels_body])
+        labels_body = torch.tensor(labels_body, dtype=torch.long).cuda()
+        # ========== 结束 ==========
+        
+        # 删除原有的调试信息，移除旧的循环代码
+        
+        # ========== 处理细分类：rgb 和 pose ==========
+        for idx, loss_name in enumerate(['rgb', 'pose']):
+            if loss_name not in cls_scores:
+                continue
+            weight = self.loss_weights[idx]  # 权重索引 0, 1
             cls_score1 = cls_scores[loss_name]
             loss_cls = self.loss_by_scores(cls_score1, labels)
             loss_cls = {loss_name + '_' + k: v for k, v in loss_cls.items()}
             loss_cls[f'{loss_name}_loss_cls'] *= weight
             losses.update(loss_cls)
 
-            # ========== 修改：使用正确的映射函数 ==========
-            labels_body = labels.cpu().numpy()
-            if is_ntu60:  # NTU-60
-                labels_body = np.array([action2body_ntu60(int(i)) for i in labels_body])
-            else:  # MA-52
-                labels_body = np.array([action2body(int(i)) for i in labels_body])
-            labels_body = torch.tensor(labels_body, dtype=torch.long).cuda()
-
-            cls_score2 = cls_scores[loss_name+'_coarse']
-            loss_name = loss_name+'_coarse'
+        # ========== 处理粗分类：rgb_coarse 和 pose_coarse ==========
+        for idx, loss_name in enumerate(['rgb_coarse', 'pose_coarse'], start=2):
+            if loss_name not in cls_scores:
+                continue
+            weight = self.loss_weights[idx]  # 权重索引 2, 3
+            cls_score2 = cls_scores[loss_name]
             loss_cls = self.loss_by_scores(cls_score2, labels_body)
             loss_cls = {loss_name + '_' + k: v for k, v in loss_cls.items()}
             loss_cls[f'{loss_name}_loss_cls'] *= weight
@@ -758,7 +762,7 @@ class RGBPoseHead(BaseHead):
             losses['rgb_fr_loss'] = cls_scores['fr_loss_rgb']/5
             losses['pose_fr_loss'] = cls_scores['fr_loss_pose']/5
             losses['hierarchy_rgb_loss'] = cls_scores['hierarchy_loss_rgb']
-            losses['hierarchy_pose_loss'] = cls_scores['hierarchy_loss_pose']
+            losses['hierarchy_loss_pose'] = cls_scores['hierarchy_loss_pose']
         return losses
 
     def loss_by_scores(self, cls_scores: torch.Tensor,
