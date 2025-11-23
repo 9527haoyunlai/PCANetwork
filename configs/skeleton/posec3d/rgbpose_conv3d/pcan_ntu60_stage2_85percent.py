@@ -1,7 +1,8 @@
 _base_ = '../../../_base_/default_runtime.py'
 
 # ==========================================
-# 模型配置
+# 阶段2: 性能提升 (85-90%目标)
+# 从阶段1的70-75%基础上，逐步增强
 # ==========================================
 backbone_cfg = dict(
     type='RGBPoseConv3D',
@@ -25,7 +26,7 @@ backbone_cfg = dict(
         lateral_infl=16,
         lateral_activate=(0, 1, 1),
         fusion_kernel=7,
-        in_channels=17,  # ← 如果是2D骨架用17，3D骨架用25
+        in_channels=17,
         base_channels=32,
         out_indices=(2, ),
         conv1_kernel=(1, 7, 7),
@@ -42,10 +43,10 @@ backbone_cfg = dict(
 head_cfg = dict(
     type='RGBPoseHead',
     num_classes=60,
-    num_coarse_classes=8,  # ← 添加：NTU-60使用8个粗类
+    num_coarse_classes=8,
     in_channels=[2048, 512],
-    loss_components=['rgb', 'pose'],  # ← 只保留基础名称，不要加 _coarse
-    loss_weights=[1., 1.2, 0.5, 0.8],  # ← 修正：降低pose权重避免崩溃（2.0→1.2）
+    loss_components=['rgb', 'pose'],
+    loss_weights=[1.0, 1.2, 0.5, 0.9],  # ← 阶段2保守：轻微提升Pose (从87%基础)
     average_clips='prob')
 
 data_preprocessor = dict(
@@ -70,19 +71,16 @@ model = dict(
 dataset_type = 'PoseDataset'
 data_root = '/home/zh/ChCode/codes01/mmaction2/data/nturgbd_videos/'
 
-# ← 改：使用合并后的pkl文件
 ann_file = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub.pkl'
 ann_file_val = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub.pkl'
 ann_file_test = '/home/zh/ChCode/codes01/mmaction2/data/skeleton/ntu60_xsub.pkl'
 
-# NTU-60的左右关键点（17点-2D骨架）
 left_kp = [1, 3, 5, 7, 9, 11, 13, 15]
 right_kp = [2, 4, 6, 8, 10, 12, 14, 16]
 
-# 如果是25点-3D骨架，使用：
-# left_kp = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
-# right_kp = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24]
-
+# ==========================================
+# 训练Pipeline（中等强度数据增强）
+# ==========================================
 train_pipeline = [
     dict(
         type='MMUniformSampleFrames',
@@ -91,10 +89,10 @@ train_pipeline = [
     dict(type='MMDecode'),
     dict(type='MMCompact', hw_ratio=1., allow_imgpad=True),
     dict(type='Resize', scale=(256, 256), keep_ratio=False),
-    dict(type='RandomResizedCrop', area_range=(0.50, 1.0)),  # ← 优化：增加裁剪变化范围(0.56→0.50)
+    dict(type='RandomResizedCrop', area_range=(0.56, 1.0)),  # ← 阶段2保守：保持阶段1成功配置
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Flip', flip_ratio=0.5, left_kp=left_kp, right_kp=right_kp),
-    # dict(type='ColorJitter', brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),  # ← 临时禁用：数据增强太强
+    # dict(type='ColorJitter', brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # ← 暂时禁用，避免破坏87%权重
     dict(
         type='GeneratePoseTarget',
         sigma=0.7,
@@ -126,11 +124,14 @@ val_pipeline = [
     dict(type='PackActionInputs', collect_keys=('imgs', 'heatmap_imgs'))
 ]
 
+# ==========================================
+# 测试Pipeline（TTA：5 clips）
+# ==========================================
 test_pipeline = [
     dict(
         type='MMUniformSampleFrames',
         clip_len=dict(RGB=8, Pose=32),
-        num_clips=10,  # 多clip测试
+        num_clips=5,  # ← 阶段2：3→5，逐步增强TTA
         test_mode=True),
     dict(type='MMDecode'),
     dict(type='MMCompact', hw_ratio=1., allow_imgpad=True),
@@ -147,7 +148,7 @@ test_pipeline = [
 ]
 
 train_dataloader = dict(
-    batch_size=20,
+    batch_size=16,
     num_workers=16,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
@@ -155,7 +156,7 @@ train_dataloader = dict(
         type=dataset_type,
         ann_file=ann_file,
         data_prefix=dict(video=data_root),
-        split='xsub_train',  # ← NTU-60的split
+        split='xsub_train',
         pipeline=train_pipeline))
 
 val_dataloader = dict(
@@ -188,47 +189,44 @@ val_evaluator = [dict(type='AccMetric')]
 test_evaluator = val_evaluator
 
 # ==========================================
-# 训练配置
+# 训练配置（阶段2：50 epochs）
 # ==========================================
 train_cfg = dict(
     type='EpochBasedTrainLoop', 
-    max_epochs=30,  # ← 从epoch 26再训练30个epoch（到epoch 56）
+    max_epochs=30,  # ← 阶段2保守：30 epochs (87%→92%足够)
     val_begin=1, 
     val_interval=1)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
-# 优化器配置（双卡）
+# 优化器配置（保守策略：从87%微调）
 optim_wrapper = dict(
     optimizer=dict(
         type='SGD', 
-        lr=0.001,           # ← 修正：使用更保守的学习率微调（0.003→0.001）
+        lr=0.003,             # ← 阶段2保守：温和微调 (0.008→0.003)
         momentum=0.9, 
-        weight_decay=0.0001
-    ),
-    clip_grad=dict(max_norm=20, norm_type=2))
+        weight_decay=0.0005), # ← 增加正则化
+    clip_grad=dict(max_norm=20, norm_type=2))  # ← 降低梯度裁剪
 
-# 学习率调度策略：简单的余弦退火（不要warmup！）
+# 学习率调度策略（保守Cosine退火）
 param_scheduler = [
     dict(
         type='CosineAnnealingLR',
-        T_max=30,               # 30个epoch的余弦退火
-        eta_min=1e-5,           # 最小学习率
+        T_max=30,
+        eta_min=1e-6,  # ← 更低的最小lr
         by_epoch=True,
         begin=0,
         end=30)
 ]
 
-# ← 优化：从最佳checkpoint继续训练（Epoch 26, acc=0.8919）
-# load_from = '/home/zh/ChCode/codes01/mmaction2/pretrained/ntu60/rgbpose_ntu60_init.pth'
-# resume = True  # ← 自动从work_dirs中的last_checkpoint恢复训练
-load_from = 'work_dirs/pcan_ntu60/best_acc_RGBPose_1:1_top1_epoch_26.pth'
-resume = False  # 不恢复scheduler
+# ← 从阶段1最佳checkpoint继续（87%）
+load_from = 'work_dirs/pcan_ntu60_95target_rescue/best_acc_RGBPose_1:1_top1_epoch_42.pth'
+resume = False
 
 auto_scale_lr = dict(enable=False, base_batch_size=40)
 
 # ==========================================
-# 优化的Hooks配置
+# Hooks配置
 # ==========================================
 default_hooks = dict(
     runtime_info=dict(type='RuntimeInfoHook'),
@@ -237,16 +235,16 @@ default_hooks = dict(
     param_scheduler=dict(type='ParamSchedulerHook'),
     checkpoint=dict(
         type='CheckpointHook', 
-        interval=5,              # ← 每5个epoch保存一次checkpoint
-        save_best='acc/RGBPose_1:1_top1',  # ← 按照融合准确率保存最佳模型
+        interval=5,
+        save_best='acc/RGBPose_1:1_top1',
         rule='greater',
-        max_keep_ckpts=5),       # ← 只保留最近5个checkpoint
+        max_keep_ckpts=10),
     sampler_seed=dict(type='DistSamplerSeedHook'),
     sync_buffers=dict(type='SyncBuffersHook'),
-    early_stopping=dict(        # ← 修改：放宽早停条件
+    early_stopping=dict(
         type='EarlyStoppingHook',
         monitor='acc/RGBPose_1:1_top1',
-        patience=15,             # ← 增加到15个epoch
-        min_delta=0.0005))       # ← 降低阈值到0.05%
+        patience=10,  # ← 阶段2保守：更敏感
+        min_delta=0.0003))  # ← 更精细的阈值
 
 
