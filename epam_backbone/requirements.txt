@@ -1,0 +1,18 @@
+# EPAM Backbone 依赖包
+# 纯PyTorch实现，无需mmcv
+
+# 核心依赖
+torch>=1.7.0
+torchvision>=0.8.0
+
+# 基础科学计算
+numpy>=1.19.0
+
+# 可选：用于数据处理
+# opencv-python>=4.5.0  # 如果需要处理视频
+# pillow>=8.0.0         # 如果需要处理图像
+# scipy>=1.5.0          # 如果需要高级数学运算
+
+# 可选：用于可视化
+# matplotlib>=3.3.0
+# tensorboard>=2.4.0
