@@ -1,6 +1,9 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import mmcv
-from mmcv import digit_version
+try:
+    from mmcv import digit_version
+except ImportError:
+    digit_version = lambda x: x  # 兼容性处理
 
 from .version import __version__
 

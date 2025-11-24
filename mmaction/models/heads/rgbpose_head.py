@@ -586,17 +586,18 @@ class RGBPoseHead(BaseHead):
         self.avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
         self.avg_pool2d = nn.AdaptiveAvgPool2d((1, 1))
 
+        # 使用实际的in_channels而不是硬编码
         self.fr_coarse_rgb = ST_RenovateNet(
-            2048, 8,  n_class=num_coarse_classes, h_channel=128, version='V0', use_p_map=True)
+            self.in_channels[0], 8,  n_class=num_coarse_classes, h_channel=128, version='V0', use_p_map=True)
 
         self.fr_coarse_pose = ST_RenovateNet(
-            512, 32,  n_class=num_coarse_classes, h_channel=128, version='V0',  use_p_map=True)
+            self.in_channels[1], 32,  n_class=num_coarse_classes, h_channel=128, version='V0',  use_p_map=True)
 
         self.fr_rgb = ST_RenovateNet_Fine(
-            2048, n_class=num_classes, version='V0', use_p_map=True,
+            self.in_channels[0], n_class=num_classes, version='V0', use_p_map=True,
             n_class_coarse=num_coarse_classes)  # ← 传递粗分类数
         self.fr_pose = ST_RenovateNet_Fine(
-            512, n_class=num_classes, version='V0', use_p_map=True,
+            self.in_channels[1], n_class=num_classes, version='V0', use_p_map=True,
             n_class_coarse=num_coarse_classes)  # ← 传递粗分类数
 
         self.tree_loss_rgb = TreeLoss(
