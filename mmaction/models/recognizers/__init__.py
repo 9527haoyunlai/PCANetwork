@@ -7,8 +7,10 @@ from .recognizer_audio import RecognizerAudio
 from .recognizer_gcn import RecognizerGCN
 from .recognizer_omni import RecognizerOmni
 from .rgbpose_x3d_recognizer import RGBPoseX3DRecognizer
+from .epam_recognizer import EPAMRecognizer
 
 __all__ = [
     'BaseRecognizer', 'RecognizerGCN', 'Recognizer2D', 'Recognizer3D',
-    'RecognizerAudio', 'RecognizerOmni', 'MMRecognizer3D', 'RGBPoseX3DRecognizer'
+    'RecognizerAudio', 'RecognizerOmni', 'MMRecognizer3D', 'RGBPoseX3DRecognizer',
+    'EPAMRecognizer'
 ]

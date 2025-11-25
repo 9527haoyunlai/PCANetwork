@@ -4,10 +4,18 @@ Pure PyTorch implementation without mmcv dependencies
 """
 import torch
 import torch.nn as nn
-from .x3d_temporal_shift_rgb import X3DTemporalShift
-from .x3d_temporal_shift_pose import X3DTemporalShiftPose
-from .attention_module import CBAMSpatialEfficientTemporalAttention
-from .utils import kaiming_init, constant_init
+
+# 兼容相对导入和绝对导入
+try:
+    from .x3d_temporal_shift_rgb import X3DTemporalShift
+    from .x3d_temporal_shift_pose import X3DTemporalShiftPose
+    from .attention_module import CBAMSpatialEfficientTemporalAttention
+    from .utils import kaiming_init, constant_init
+except ImportError:
+    from x3d_temporal_shift_rgb import X3DTemporalShift
+    from x3d_temporal_shift_pose import X3DTemporalShiftPose
+    from attention_module import CBAMSpatialEfficientTemporalAttention
+    from utils import kaiming_init, constant_init
 
 
 class EPAMBackbone(nn.Module):

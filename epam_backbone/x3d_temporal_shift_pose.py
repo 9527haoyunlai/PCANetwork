@@ -6,7 +6,12 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .utils import ConvModule, Swish, build_activation_layer, kaiming_init, constant_init
+
+# 兼容相对导入和绝对导入
+try:
+    from .utils import ConvModule, Swish, build_activation_layer, kaiming_init, constant_init
+except ImportError:
+    from utils import ConvModule, Swish, build_activation_layer, kaiming_init, constant_init
 
 
 class SEModule(nn.Module):
